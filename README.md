@@ -9,7 +9,6 @@
 > **Порядок: сначала PassWall2, потом Zapret.** Zapret-Manager качает архив с GitHub Releases,
 > а `release-assets.githubusercontent.com` у российских провайдеров не открывается. Пакеты
 > PassWall2 лежат на SourceForge и доступны — поэтому сначала туннель, Zapret через него.
-> Записи в `/etc/hosts` не помогают.
 
 > [!NOTE]
 > Гайд строго под 25.12: пакетный менеджер **apk**, фаервол **fw4/nftables**.
