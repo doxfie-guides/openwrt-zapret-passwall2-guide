@@ -1,6 +1,24 @@
-# Zapret + PassWall2 на OpenWrt 25.12
+# PassWall2 + Zapret на OpenWrt 25.12
 
-Настройка **Zapret** и **PassWall2** на чистом роутере с **OpenWrt 25.12**
+Настройка **PassWall2** (маршрутизация трафика через VPN) и **Zapret** (обход DPI) на чистом роутере с **OpenWrt 25.12**.
+
+Заменяет связку Zapret + Podkop. Почему — см. [«Почему PassWall2, а не Podkop»](#-почему-passwall2-а-не-podkop).
+
+> [!IMPORTANT]
+> **Порядок важен: сначала PassWall2, потом Zapret.**
+>
+> С 27.08.2026 у ряда провайдеров (в первую очередь Ростелеком) заблокированы по IP четыре
+> Fastly-адреса `185.199.108–111.133` — это `raw.githubusercontent.com`,
+> `release-assets.githubusercontent.com` и весь `*.githubusercontent.com`. Пинг не проходит,
+> TCP уходит в таймаут. Zapret тут **не поможет**: это не DPI, а блокировка маршрута —
+> обходить нечего, пакеты просто не доходят. Записи в `hosts` тоже бесполезны, потому что
+> заблокированы сами адреса.
+>
+> Zapret-Manager качает архив с GitHub Releases → без VPN установка не проходит.
+> Поэтому первым поднимаем туннель, а Zapret ставим уже через него.
+>
+> Пакеты PassWall2 лежат на SourceForge (`216.105.38.12`, своя сеть) — под блокировку
+> не попадают.
 
 > [!NOTE]
 > Гайд написан строго под **25.12**: пакетный менеджер **apk** (opkg в 25.12 больше нет),
@@ -14,36 +32,74 @@
 - Доступ по **SSH** к роутеру
 - Интернет работает **на самом роутере**
 - Свободно в `/overlay` — **не менее 15 МБ**
-
-> [!WARNING]
-> Если одна из стратегий **Zapret** не работает на **ПК с Windows**, выполнить в **PowerShell**:
->
-> ```powershell
-> netsh int tcp set global timestamps=enabled
-> ```
-
----
-
-## 🧨 Шаг 1. Установка Zapret
-
-Ставим **первым**, до PassWall2.
+- Ссылка на VPN-ноду (`vless://…`) или URL подписки — **под рукой заранее**
 
 ```sh
-sh <(wget -O - https://raw.githubusercontent.com/StressOzz/Zapret-Manager/main/Zapret-Manager.sh)
+. /etc/openwrt_release; echo "$DISTRIB_RELEASE / $DISTRIB_ARCH"; apk --version; df -h /overlay
 ```
 
-Появится меню: выбрать пункт цифрой, нажать **Enter**, следовать подсказкам.
+Ожидаем `25.12.x`, свою архитектуру и `apk-tools 3.x`.
 
-Проект: https://github.com/StressOzz/Zapret-Manager
+<details>
+<summary>Мои роутеры — для сверки</summary>
 
-> [!NOTE]
-> Zapret живёт в nftables-таблице `inet zapret`, PassWall2 — в `inet passwall2`, фаервол —
-> в `inet fw4`. Друг друга они не трогают, но нужна одна галка в PassWall2, иначе Zapret
-> тихо перестанет делать своё дело — см. [шаг 5.1](#51-создать-shunt-узел).
+| роутер | архитектура | `/overlay` всего |
+|---|---|---|
+| Cudy WR3000E v1 (mediatek/filogic) | `aarch64_cortex-a53` | 44 МБ |
+
+</details>
 
 ---
 
-## 📦 Шаг 2. Подключение репозитория PassWall2
+## 🩺 Шаг 0. Проверка связности
+
+Выясняем, что вообще доступно с роутера. Три команды:
+
+```sh
+wget -q -O /dev/null "https://master.dl.sourceforge.net/project/openwrt-passwall-build/apk.pub" && echo "sourceforge OK" || echo "sourceforge BLOCKED"
+wget -q -O /dev/null "https://downloads.openwrt.org/releases/" && echo "openwrt OK" || echo "openwrt BLOCKED"
+wget -q -T 5 -O /dev/null "https://raw.githubusercontent.com/StressOzz/Zapret-Manager/main/Zapret-Manager.sh" && echo "github OK" || echo "github BLOCKED"
+```
+
+| результат | что делать |
+|---|---|
+| `sourceforge OK` | идём дальше, PassWall2 поставится |
+| `openwrt BLOCKED` | сначала [шаг 1](#-шаг-1-зеркало-openwrt-если-нужно) |
+| `github BLOCKED` | ожидаемо, лечится туннелем на [шаге 5](#-шаг-5-временно-весь-роутер-через-vpn) |
+| `sourceforge BLOCKED` | плохо: качать пакеты на ПК под VPN и заливать `scp` вручную |
+
+---
+
+## 🪞 Шаг 1. Зеркало OpenWrt (если нужно)
+
+Только если шаг 0 дал `openwrt BLOCKED`. Зависимости PassWall2 (`kmod-nft-tproxy`, `unzip`
+и прочее) тянутся из штатного фида, поэтому он должен работать.
+
+Проверенные под 25.12 зеркала:
+
+```sh
+for m in mirror-03.infra.openwrt.org ftp.snt.utwente.nl/pub/software/openwrt mirror.sjtu.edu.cn/openwrt; do
+  printf '%s ' "$m"; wget -q -T 5 -O /dev/null "https://$m/releases/" && echo OK || echo FAIL
+done
+```
+
+Переключиться на первое, которое ответило `OK`:
+
+```sh
+cp /etc/apk/repositories.d/distfeeds.list /etc/apk/repositories.d/distfeeds.list.bak
+sed -i 's|https://downloads.openwrt.org/|https://mirror-03.infra.openwrt.org/|' /etc/apk/repositories.d/distfeeds.list
+apk update
+```
+
+Вернуть обратно, когда блокировка спадёт:
+
+```sh
+mv /etc/apk/repositories.d/distfeeds.list.bak /etc/apk/repositories.d/distfeeds.list; apk update
+```
+
+---
+
+## 📦 Шаг 2. Репозиторий PassWall2
 
 В фидах OpenWrt пакета нет — подключаем репозиторий проекта.
 Релиз фиксирован (`25.12`), архитектура подставится сама.
@@ -84,8 +140,7 @@ apk update
 apk search xray-core
 ```
 
-Должен найтись `xray-core-26.7.28` или новее. Если пусто — фиды не подключились,
-смотреть вывод `apk update` на ошибки подписи.
+Должен найтись `xray-core-26.7.28` или новее. Пусто — смотреть вывод `apk update` на ошибки.
 
 ---
 
@@ -97,7 +152,7 @@ apk search xray-core
 apk add --simulate luci-app-passwall2 luci-i18n-passwall2-ru xray-core tcping
 ```
 
-Сравнить итоговый размер со свободным местом из `df -h /overlay`. Если влезает — ставим:
+Сравнить со свободным местом из `df -h /overlay`. Если влезает — ставим:
 
 ```sh
 apk add luci-app-passwall2 luci-i18n-passwall2-ru xray-core tcping
@@ -110,8 +165,6 @@ apk add luci-app-passwall2 luci-i18n-passwall2-ru xray-core tcping
 | `xray-core` | **ядро**. Именно xray, не sing-box — см. [почему](#-почему-passwall2-а-не-podkop) |
 | `tcping` | проверка доступности нод из интерфейса |
 
-Зависимости (`kmod-nft-tproxy`, `lua`, `ip-full` и прочее) apk подтянет из штатного фида сам.
-
 > [!IMPORTANT]
 > **`geoview`, `v2ray-geoip`, `v2ray-geosite` не ставить** — это +10 МБ ради готовых
 > geo-списков (`geosite:google`, `geoip:cn`). При маршрутизации по своим доменам и подсетям
@@ -121,35 +174,117 @@ apk add luci-app-passwall2 luci-i18n-passwall2-ru xray-core tcping
 
 ---
 
-## 🌐 Шаг 4. Добавление ноды (VPN-сервера)
+## 🌐 Шаг 4. Добавление ноды
 
 ### Вариант А: одна ссылка
 
 **Службы → PassWall2 → Список узлов → Добавить** → вставить ссылку `vless://…`.
 
-### Вариант Б: подписка (если серверов несколько)
+### Вариант Б: подписка
 
 **Службы → PassWall2 → Подписки → Добавить**, вставить URL подписки.
 
 > [!WARNING]
 > Панель должна отдать **base64-список ссылок**, а не JSON-конфиг: PassWall2 парсит только
-> ссылки. Формат панели выбирают по `User-Agent`, поэтому в настройках подписки заполнить
-> поле **User-Agent** (например `v2rayN`). Список узлов пустой после обновления подписки —
+> ссылки. Формат панели выбирают по `User-Agent`, поэтому заполнить в настройках подписки
+> поле **User-Agent** (например `v2rayN`). Список узлов пустой после обновления —
 > прилетел не тот формат.
 
-Правила маршрутизации из подписки **не импортируются** — PassWall2 собирает конфиг xray
-сам, из подписки берутся только параметры серверов. Свои правила из шага 5 ничего не перетрут.
+Правила маршрутизации из подписки **не импортируются** — PassWall2 собирает конфиг xray сам,
+из подписки берутся только параметры серверов.
 
 Проверить ноду: в списке узлов нажать проверку задержки (работает через `tcping`).
 
 ---
 
-## 🚦 Шаг 5. Разделение трафика (Shunt)
+## 🔓 Шаг 5. Временно: весь роутер через VPN
 
-Ядро настройки: гнать в VPN **только нужное**, всё остальное отдавать напрямую,
-чтобы им занимался Zapret.
+Это временный режим, нужный ровно для того, чтобы поставить Zapret и всё остальное с GitHub.
 
-### 5.1. Создать Shunt-узел
+**PassWall2 → Основные настройки**, вкладка **Main**:
+
+| параметр | значение |
+|---|---|
+| Включить | ✅ |
+| **Основной узел** | ваша VPN-нода (пока **не** Shunt) |
+| **Прокси для самого роутера** | ✅ **включить** |
+
+> [!NOTE]
+> «Прокси для самого роутера» (`localhost_proxy`) — то, чего принципиально не умеет
+> Podkop/NetShift: PassWall2 вешает свои цепочки ещё и на `output`, поэтому через туннель
+> идёт трафик самого роутера, а не только клиентов. Именно на этом держится вся схема.
+
+Сохранить и применить. Проверить, что роутер вышел через ноду:
+
+```sh
+wget -q -O - https://ipinfo.io/ip; echo
+```
+
+Должен показать IP ноды. Показывает домашний — туннель не поднялся, дальше идти нет смысла.
+
+---
+
+## 🧨 Шаг 6. Установка Zapret
+
+Теперь GitHub доступен через туннель, и установщик отработает штатно.
+
+```sh
+sh <(wget -O - https://raw.githubusercontent.com/StressOzz/Zapret-Manager/main/Zapret-Manager.sh)
+```
+
+Появится меню: установка Zapret — пункт **`1`**. Стратегии — пункт **`3`**.
+
+Проект: https://github.com/StressOzz/Zapret-Manager
+
+<details>
+<summary>Если Zapret всё-таки не качается</summary>
+
+Значит туннель не покрывает загрузку. Запасные пути, по убыванию удобства:
+
+**Через прокси-режим самого скрипта.** У Zapret-Manager есть фолбэк на `gh-proxy.org`,
+включается сам, если недоступен `raw.githubusercontent.com`. Имитируем недоступность:
+
+```sh
+wget -O /tmp/zms.sh https://raw.githubusercontent.com/StressOzz/Zapret-Manager/main/Zapret-Manager.sh
+printf '#zmproxy\n127.0.0.1 raw.githubusercontent.com\n' >> /etc/hosts
+/etc/init.d/dnsmasq restart
+sh /tmp/zms.sh
+```
+
+Скрипт напишет «недоступен — используем прокси». **После установки откатить:**
+
+```sh
+sed -i '/#zmproxy/,+1d' /etc/hosts; /etc/init.d/dnsmasq restart
+```
+
+**Руками из файла.** Скачать zip на ПК под VPN
+(`github.com/remittor/zapret-openwrt/releases`), залить и поставить:
+
+```sh
+mkdir -p /tmp/zapret_temp
+# с ПК: scp zapret_v*_<арх>.zip root@192.168.1.1:/tmp/zapret_temp/
+cd /tmp/zapret_temp && apk add unzip && unzip -o zapret_v*.zip
+for p in apk/zapret*; do case "$p" in *luci*) continue;; esac; apk add --allow-untrusted "$p"; done
+for p in apk/luci*; do apk add --allow-untrusted "$p"; done
+```
+
+Стратегии потом через меню скрипта (пункт `3`).
+
+> [!WARNING]
+> Пункт `0` → `11) githubusercontent.com` (записи в `hosts`) при блокировке по IP
+> **не работает** — заблокированы сами адреса `185.199.108–111.133`, а других у этих
+> доменов нет. Не тратить на него время.
+
+</details>
+
+---
+
+## 🚦 Шаг 7. Боевая схема разделения трафика
+
+Переключаемся с временного «всё через VPN» на нормальный режим: в туннель — только нужное,
+остальное напрямую, чтобы им занимался Zapret.
+
+### 7.1. Создать Shunt-узел
 
 **Список узлов → Добавить**, тип узла — **Shunt (разделение трафика)**.
 
@@ -169,16 +304,27 @@ apk add luci-app-passwall2 luci-i18n-passwall2-ru xray-core tcping
 > а он в цепочке стоит **раньше** правила перехвата и делает `return`. Прямой трафик уходит
 > в WAN обычным форвардом — ровно так, как Zapret ждёт.
 
-### 5.2. Создать правила
+### 7.2. Создать правила
 
 **PassWall2 → Правила разделения трафика → Добавить**. Одно правило — одна группа сервисов.
 
-Правило для доменов:
+**Обязательное правило — инфраструктура.** Иначе следующее обновление Zapret, списков или
+пакетов снова упрётся в блокировку:
 
 | поле | значение |
 |---|---|
-| Примечание | `my-domains` |
-| Домены | список, по одному в строке |
+| Примечание | `infra` |
+| Домены | см. ниже |
+
+```text
+domain:github.com
+domain:githubusercontent.com
+domain:githubassets.com
+domain:openwrt.org
+domain:sourceforge.net
+```
+
+Правило для своих доменов:
 
 ```text
 domain:example.com     # сам домен и все поддомены (рекомендуется)
@@ -208,19 +354,19 @@ geosite:google         # готовый список (нужен пакет v2ra
 > Правила с **IP** отрабатывают на уровне nftables, ещё до захода в xray — быстрее доменных.
 > Всё, что известно подсетями, задавать подсетями.
 
-### 5.3. Привязать правила к ноде
+### 7.3. Привязать правила к ноде
 
 Вернуться в настройки Shunt-узла — там появились строки, по одной на каждое правило.
 Напротив нужных выбрать VPN-ноду, напротив остальных оставить **Прямое соединение**.
 
-### 5.4. Включить
+### 7.4. Переключиться на Shunt
 
 **PassWall2 → Основные настройки**:
 
 | параметр | значение |
 |---|---|
 | **Основной узел** | созданный Shunt-узел |
-| Включить | ✅ |
+| **Прокси для самого роутера** | ✅ оставить включённым |
 
 Вкладка **DNS**:
 
@@ -239,7 +385,7 @@ geosite:google         # готовый список (нужен пакет v2ra
 
 ---
 
-## ✅ Шаг 6. Проверка
+## ✅ Шаг 8. Проверка
 
 Обе службы на месте и не пересекаются:
 
@@ -247,25 +393,33 @@ geosite:google         # готовый список (нужен пакет v2ra
 nft list tables | grep -E 'passwall2|zapret'
 ```
 
-«Прямой» набор наполняется:
+«Прямой» набор наполняется, ядро запущено:
 
 ```sh
 nft list sets inet passwall2 | grep white
+pgrep -a xray
 ```
 
-Ядро запущено:
+Инфраструктура ходит через туннель — команда должна вернуть IP ноды:
 
 ```sh
-pgrep -a xray
+wget -q -O - https://ipinfo.io/ip; echo
 ```
 
 С клиента в LAN:
 
-1. Открыть сайт **из** списка → проверить IP на https://ipinfo.io — должен быть IP ноды.
-2. Открыть сайт **не из** списка → IP должен быть домашний.
-3. Проверить обход DPI: https://hyperion-cs.github.io/dpi-checkers/ru/tcp-16-20/ → **Start**.
+1. Сайт **из** списка → IP на https://ipinfo.io должен быть IP ноды.
+2. Сайт **не из** списка → IP должен быть домашний.
+3. Обход DPI: https://hyperion-cs.github.io/dpi-checkers/ru/tcp-16-20/ → **Start**.
 
 Логи: **Службы → PassWall2 → Журнал**.
+
+> [!WARNING]
+> Если одна из стратегий **Zapret** не работает на **ПК с Windows**, выполнить в **PowerShell**:
+>
+> ```powershell
+> netsh int tcp set global timestamps=enabled
+> ```
 
 ---
 
@@ -275,17 +429,14 @@ pgrep -a xray
 apk update && apk upgrade
 ```
 
-Отдельно ядро — обновлять стоит, от версии xray зависит совместимость с сервером:
+Отдельно ядро — от версии xray зависит совместимость с сервером:
 
 ```sh
 apk add -u xray-core
-```
-
-Проверить, что версия сменилась:
-
-```sh
 apk list -I xray-core
 ```
+
+Zapret — через меню скрипта, пункт `1` (переустановит поверх).
 
 ---
 
@@ -340,6 +491,8 @@ rm -f /etc/apk/keys/passwall.pub
 PassWall2 работает на **xray-core**, который отдаёт настоящую версию. Плюс:
 
 - ядро выбирается явно, обновляется отдельно от прошивки;
+- **проксируется трафик самого роутера** — без этого установка чего-либо с GitHub сейчас
+  невозможна;
 - правила по источнику (телевизор — в один VPN, ноутбук — в другой);
 - цепочки прокси, балансировка, подписки;
 - проект живой — десятки коммитов в месяц против одного у Podkop.
@@ -347,7 +500,7 @@ PassWall2 работает на **xray-core**, который отдаёт на�
 Минусы, честно:
 
 - интерфейс сложнее и переведён не целиком, часть подсказок на английском;
-- по умолчанию перехватывает весь трафик — нужна галка из [шага 5.1](#51-создать-shunt-узел);
+- по умолчанию перехватывает весь трафик — нужна галка из [шага 7.1](#71-создать-shunt-узел);
 - проект китайский, дефолты и готовые списки заточены под Китай — свои списки вести самому.
 
 ---
@@ -355,10 +508,14 @@ PassWall2 работает на **xray-core**, который отдаёт на�
 ## 📎 Краткие команды
 
 ```sh
-# Zapret
-sh <(wget -O - https://raw.githubusercontent.com/StressOzz/Zapret-Manager/main/Zapret-Manager.sh)
+# 0. Проверка связности
+wget -q -O /dev/null "https://master.dl.sourceforge.net/project/openwrt-passwall-build/apk.pub" && echo "sourceforge OK" || echo "sourceforge BLOCKED"
+wget -q -O /dev/null "https://downloads.openwrt.org/releases/" && echo "openwrt OK" || echo "openwrt BLOCKED"
 
-# Репозиторий PassWall2
+# 1. Зеркало OpenWrt, если нужно
+sed -i 's|https://downloads.openwrt.org/|https://mirror-03.infra.openwrt.org/|' /etc/apk/repositories.d/distfeeds.list; apk update
+
+# 2. Репозиторий PassWall2
 . /etc/openwrt_release
 B="https://master.dl.sourceforge.net/project/openwrt-passwall-build"
 R="25.12"; A="$DISTRIB_ARCH"
@@ -368,10 +525,16 @@ for f in passwall_packages passwall_luci passwall2; do
 done >> /etc/apk/repositories.d/customfeeds.list
 apk update
 
-# Установка PassWall2
+# 3. Установка PassWall2
 apk add luci-app-passwall2 luci-i18n-passwall2-ru xray-core tcping
 
-# Проверка
+# 4-5. Нода + «Прокси для самого роутера» — через LuCI, затем проверка:
+wget -q -O - https://ipinfo.io/ip; echo
+
+# 6. Zapret (уже через туннель)
+sh <(wget -O - https://raw.githubusercontent.com/StressOzz/Zapret-Manager/main/Zapret-Manager.sh)
+
+# 8. Проверка
 df -h /overlay
 nft list tables | grep -E 'passwall2|zapret'
 pgrep -a xray
@@ -384,4 +547,6 @@ pgrep -a xray
 - PassWall2: https://github.com/Openwrt-Passwall/openwrt-passwall2
 - Сборки под 25.12: https://sourceforge.net/projects/openwrt-passwall-build/files/releases/packages-25.12/
 - Zapret-Manager: https://github.com/StressOzz/Zapret-Manager
+- Архивы Zapret: https://github.com/remittor/zapret-openwrt/releases
 - Проверка DPI: https://hyperion-cs.github.io/dpi-checkers/ru/tcp-16-20/
+- Блокировка githubusercontent 27.08.2026: https://github.com/StressOzz/Zapret-Manager/issues/1023
