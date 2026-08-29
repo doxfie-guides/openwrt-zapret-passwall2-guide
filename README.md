@@ -16,23 +16,6 @@
 - Интернет работает **на самом роутере**
 - Свободно в `/overlay` — **не менее 15 МБ**
 
-Проверить, что версия та и место есть:
-
-```sh
-. /etc/openwrt_release; echo "$DISTRIB_RELEASE / $DISTRIB_ARCH"; apk --version; df -h /overlay
-```
-
-Ожидаем `25.12.x`, свою архитектуру и `apk-tools 3.x`.
-
-<details>
-<summary>Мои роутеры — для сверки</summary>
-
-| роутер | архитектура | `/overlay` всего |
-|---|---|---|
-| Cudy WR3000E v1 (mediatek/filogic) | `aarch64_cortex-a53` | 44 МБ |
-
-</details>
-
 > [!WARNING]
 > Если одна из стратегий **Zapret** не работает на **ПК с Windows**, выполнить в **PowerShell**:
 >
