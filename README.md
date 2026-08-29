@@ -1,21 +1,30 @@
 # PassWall2 + Zapret на OpenWrt 25.12
 
-Настройка **PassWall2** (маршрутизация трафика через VPN) и **Zapret** (обход DPI) на чистом роутере с **OpenWrt 25.12**.
+Настройка **PassWall2** (маршрутизация трафика через VPN) и **Zapret** (обход DPI)
+на чистом роутере с **OpenWrt 25.12**.
 
 Заменяет связку Zapret + Podkop. Почему — см. [«Почему PassWall2, а не Podkop»](#-почему-passwall2-а-не-podkop).
 
 > [!IMPORTANT]
 > **Порядок важен: сначала PassWall2, потом Zapret.**
 >
-> С 27.08.2026 у ряда провайдеров (в первую очередь Ростелеком) заблокированы по IP четыре
-> Fastly-адреса `185.199.108–111.133` — это `raw.githubusercontent.com`,
-> `release-assets.githubusercontent.com` и весь `*.githubusercontent.com`. Пинг не проходит,
-> TCP уходит в таймаут. Zapret тут **не поможет**: это не DPI, а блокировка маршрута —
-> обходить нечего, пакеты просто не доходят. Записи в `hosts` тоже бесполезны, потому что
-> заблокированы сами адреса.
+> Zapret-Manager качает архив с **GitHub Releases**, а файлы оттуда отдаёт
+> `release-assets.githubusercontent.com` — и с конца августа 2026 этот хост у российских
+> провайдеров не открывается. Без VPN установка Zapret не проходит вообще, поэтому первым
+> поднимаем туннель, а Zapret ставим уже через него.
 >
-> Zapret-Manager качает архив с GitHub Releases → без VPN установка не проходит.
-> Поэтому первым поднимаем туннель, а Zapret ставим уже через него.
+> Встречаются **два разных механизма** — важно не перепутать, лечатся они по-разному:
+>
+> | что происходит | как отличить | чем лечится |
+> |---|---|---|
+> | **блок по имени (SNI)** | `raw.githubusercontent.com` отвечает, `release-assets` молчит — хотя IP у них одни и те же | только VPN. `hosts` бесполезен: DNS и адреса не при чём |
+> | **блок по IP** | не отвечает ни один хост на `185.199.108–111.133`, пинг не проходит | только VPN. Zapret бессилен — это не DPI, пакеты не доходят |
+>
+> В первом случае Zapret после установки, скорее всего, начнёт пробивать этот хост сам —
+> SNI-дроп ровно его работа. Но чтобы его поставить, нужен туннель. Отсюда и порядок.
+>
+> Пакеты PassWall2 лежат на SourceForge (`216.105.38.12`, своя сеть) — под блокировку
+> не попадают.
 >
 > Пакеты PassWall2 лежат на SourceForge (`216.105.38.12`, своя сеть) — под блокировку
 > не попадают.
@@ -56,17 +65,26 @@
 Выясняем, что вообще доступно с роутера. Три команды:
 
 ```sh
-wget -q -O /dev/null "https://master.dl.sourceforge.net/project/openwrt-passwall-build/apk.pub" && echo "sourceforge OK" || echo "sourceforge BLOCKED"
-wget -q -O /dev/null "https://downloads.openwrt.org/releases/" && echo "openwrt OK" || echo "openwrt BLOCKED"
-wget -q -T 5 -O /dev/null "https://raw.githubusercontent.com/StressOzz/Zapret-Manager/main/Zapret-Manager.sh" && echo "github OK" || echo "github BLOCKED"
+for h in master.dl.sourceforge.net downloads.openwrt.org github.com raw.githubusercontent.com release-assets.githubusercontent.com; do
+  printf '%-40s ' "$h"; curl -sI -o /dev/null -m 8 -w 'code=%{http_code} t=%{time_total}\n' "https://$h/" || echo TIMEOUT
+done
 ```
+
+`code=000` вместе с `t=8.0` — хост не отвечает. Любой другой код (200, 301, даже 404)
+означает, что TLS прошёл и хост доступен.
 
 | результат | что делать |
 |---|---|
-| `sourceforge OK` | идём дальше, PassWall2 поставится |
-| `openwrt BLOCKED` | сначала [шаг 1](#-шаг-1-зеркало-openwrt-если-нужно) |
-| `github BLOCKED` | ожидаемо, лечится туннелем на [шаге 5](#-шаг-5-временно-весь-роутер-через-vpn) |
-| `sourceforge BLOCKED` | плохо: качать пакеты на ПК под VPN и заливать `scp` вручную |
+| первые два отвечают | идём дальше, PassWall2 поставится |
+| `downloads.openwrt.org` молчит | сначала [шаг 1](#-шаг-1-зеркало-openwrt-если-нужно) |
+| `release-assets` молчит, `raw` отвечает | ожидаемо — блок по SNI, лечится туннелем на [шаге 5](#-шаг-5-временно-весь-роутер-через-vpn) |
+| молчат все `*.githubusercontent.com` | блок по IP, лечится тем же туннелем |
+| `master.dl.sourceforge.net` молчит | плохо: качать пакеты на ПК под VPN и заливать `scp` вручную |
+
+> [!TIP]
+> Ключ к диагнозу — сравнить `raw` и `release-assets`: у них **одни и те же IP**
+> `185.199.108–111.133`. Если один отвечает, а другой нет — режут по имени, и никакие
+> манипуляции с адресами не спасут.
 
 ---
 
@@ -271,9 +289,9 @@ for p in apk/luci*; do apk add --allow-untrusted "$p"; done
 Стратегии потом через меню скрипта (пункт `3`).
 
 > [!WARNING]
-> Пункт `0` → `11) githubusercontent.com` (записи в `hosts`) при блокировке по IP
-> **не работает** — заблокированы сами адреса `185.199.108–111.133`, а других у этих
-> доменов нет. Не тратить на него время.
+> Пункт `0` → `11) githubusercontent.com` (записи в `hosts`) **не помогает ни в одном из
+> двух случаев**: при блоке по SNI адреса и так правильные, при блоке по IP других адресов
+> у этих доменов нет. Не тратить на него время — проверено.
 
 </details>
 
