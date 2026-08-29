@@ -1,20 +1,14 @@
 # PassWall2 + Zapret на OpenWrt 25.12
 
-Точечная маршрутизация через VPN (PassWall2) плюс обход DPI (Zapret) на чистом роутере
-с OpenWrt 25.12
+Точечная маршрутизация через VPN (PassWall2) плюс обход DPI (Zapret) на чистом роутере с OpenWrt 25.12
 
-Нужно: SSH на роутер, рабочий интернет, **≥25 МБ** в `/overlay`, vless ключ или ссылка на подписку.
+Нужно: SSH на роутер, рабочий интернет, **≥25 МБ** в `/overlay`, ссылка на ноду или подписка.
 
 > [!IMPORTANT]
-> **Порядок: сначала PassWall2, потом Zapret.** Zapret-Manager качает архив с GitHub Releases,
-> а `release-assets.githubusercontent.com` у российских провайдеров не открывается. Пакеты
-> PassWall2 лежат на SourceForge и доступны — поэтому сначала туннель, Zapret через него.
+> **Порядок: сначала PassWall2, потом Zapret.** Zapret-Manager качает архив с GitHub Releases, а `release-assets.githubusercontent.com` у российских провайдеров не открывается. Пакеты PassWall2 лежат на SourceForge и доступны — поэтому сначала туннель, Zapret через него. Записи в `/etc/hosts` не помогают.
 
 > [!NOTE]
-> Гайд строго под 25.12: пакетный менеджер **apk**, фаервол **fw4/nftables**.
-> Podkop и NetShift не подходят принципиально — они завязаны на sing-box, который шлёт
-> зашитую версию REALITY 1.8.1 и отсекается сервером по `minClientVer`. PassWall2 работает
-> на xray-core, отдающем настоящую версию.
+> Гайд строго под 25.12: пакетный менеджер **apk**, фаервол **fw4/nftables**. Podkop и NetShift не подходят принципиально — они завязаны на sing-box, который шлёт зашитую версию REALITY 1.8.1 и отсекается сервером по `minClientVer`. PassWall2 работает на xray-core, отдающем настоящую версию.
 
 ---
 
@@ -39,10 +33,7 @@ cp /etc/config/dhcp /root/dhcp.bak && apk add dnsmasq-full
 Три команды после основной установки обязательны, сам пакет их не тянет:
 
 - **kmod'ы** — без них галки «Прокси для…» серые, в журнале `missing basic dependency`
-- **`dnsmasq-full`** — штатный собран с `no-nftset`, а на nftset держится вся схема с Zapret.
-  Проверить: `dnsmasq --version | grep -o 'no-nftset\|nftset'`, должно быть без `no-`.
-  Если apk ругнётся на конфликт:
-  `apk del dnsmasq && apk add dnsmasq-full && cp /root/dhcp.bak /etc/config/dhcp && /etc/init.d/dnsmasq restart`
+- **`dnsmasq-full`** — штатный собран с `no-nftset`, а на nftset держится вся схема с Zapret. Проверить: `dnsmasq --version | grep -o 'no-nftset\|nftset'`, должно быть без `no-`. Если apk ругнётся на конфликт: `apk del dnsmasq && apk add dnsmasq-full && cp /root/dhcp.bak /etc/config/dhcp && /etc/init.d/dnsmasq restart`
 - **`rpcd restart`** — иначе меню PassWall2 может не появиться в LuCI
 
 `geoview`, `v2ray-geoip`, `v2ray-geosite` (~10 МБ) приедут сами — они в жёстких зависимостях.
@@ -53,16 +44,13 @@ cp /etc/config/dhcp /root/dhcp.bak && apk add dnsmasq-full
 
 **Services → PassWall 2 → Список узлов → Добавить узел по ссылке** → вставить `vless://…`.
 
-Подписка: **Подписки → Добавить**, поле **User-Agent** оставить `v2rayN` (иначе панель отдаст
-JSON вместо списка ссылок). Save & Apply, затем **обязательно** «Ручное обновление подписки» —
-само не подтянется.
+Подписка: **Подписки → Добавить**, поле **User-Agent** оставить `v2rayN` (иначе панель отдаст JSON вместо списка ссылок). Save & Apply, затем **обязательно** «Ручное обновление подписки» — само не подтянется.
 
 ---
 
 ## 3. Временно: весь роутер через VPN
 
-**Общие параметры → Основной**: Узел = конкретный сервер (не `_shunt` и не `Socks: Example`),
-**Прокси для самого роутера** ✅, **Прокси для клиентских устройств** ✅, **Включить модуль** ✅.
+**Общие параметры → Основной**: Узел = конкретный сервер (не `_shunt` и не `Socks: Example`), **Прокси для самого роутера** ✅, **Прокси для клиентских устройств** ✅, **Включить модуль** ✅.
 
 Save & Apply, затем:
 
@@ -89,12 +77,9 @@ sh <(wget -O - https://raw.githubusercontent.com/StressOzz/Zapret-Manager/main/Z
 
 ## 5. Боевая схема
 
-**Список узлов → Добавить**, тип **Shunt (разделение трафика)**:
-«По умолчанию» → **Прямое соединение**, «Записывать результаты прямого DNS в IPSet» ✅.
+**Список узлов → Добавить**, тип **Shunt (разделение трафика)**: «По умолчанию» → **Прямое соединение**, «Записывать результаты прямого DNS в IPSet» ✅.
 
-Правила создаются на вкладке **«Управление правилами»**, внизу страницы. Вкладки `CN|IR|RU` —
-это группы, правило падает в открытую; проще добавлять на `RU`, узел уже настроен на неё.
-В правиле заполняется только **Домен** (и **IP**, если по подсетям), остальное пустым.
+Правила создаются на вкладке **«Управление правилами»**, внизу страницы. Вкладки `CN|IR|RU` — это группы, правило падает в открытую; проще добавлять на `RU`, узел уже настроен на неё. В правиле заполняется только **Домен** (и **IP**, если по подсетям), остальное пустым.
 
 Первым — правило `infra`, иначе следующее обновление упрётся в блокировку:
 
@@ -106,9 +91,7 @@ domain:openwrt.org
 domain:sourceforge.net
 ```
 
-Дальше свои домены — **обязательно с префиксом `domain:`**. Голый `x.ai` это поиск подстроки,
-поймает и `matrix.ai`. Комментарии через `#`. Готовые списки можно подключать категориями
-(`geosite:telegram`, `geoip:telegram` в поле IP) — состав смотреть на вкладке «Просмотр Geo».
+Дальше свои домены — **обязательно с префиксом `domain:`**. Голый `x.ai` это поиск подстроки, поймает и `matrix.ai`. Комментарии через `#`. Готовые списки можно подключать категориями (`geosite:telegram`, `geoip:telegram` в поле IP) — состав смотреть на вкладке «Просмотр Geo».
 
 Затем **Общие параметры → Правила разделения трафика** (видна, только когда Узел — Shunt):
 
@@ -138,8 +121,7 @@ curl -s -m 10 https://ipinfo.io/ip; echo " <- проксируемый, ждём
 nslookup claude.ai 127.0.0.1 | tail -3
 ```
 
-`ipinfo.io` должен быть в проксируемом правиле, `ifconfig.me` — нет. Третья команда проверяет
-FakeDNS: ждём `198.18.x.x`.
+`ipinfo.io` должен быть в проксируемом правиле, `ifconfig.me` — нет. Третья команда проверяет FakeDNS: ждём `198.18.x.x`.
 
 DPI: https://hyperion-cs.github.io/dpi-checkers/ru/tcp-16-20/
 
@@ -153,7 +135,7 @@ DPI: https://hyperion-cs.github.io/dpi-checkers/ru/tcp-16-20/
 | Кнопка «Добавить» у правила молча не срабатывает | в имени дефис. Имя правила = имя UCI-секции, только `[A-Za-z0-9_]` |
 | Перенёс домен в проксируемые, а он идёт напрямую | старые адреса залипли в nft-наборе (таймаут 365 дней): `nft flush set inet passwall2 psw2_<узел>_white` + рестарт dnsmasq и passwall2. То же делает кнопка «Очистить NFTSet» |
 | FakeDNS не отдаёт `198.18.x.x` | не включён мастер-переключатель, галки в столбце у правил без него не работают |
-| Проксируемый домен уходит мимо туннеля по IPv6 | PassWall2 перехватывает только v4. Проверить: `curl -s -m 10 -6 https://ipinfo.io/ip` — пусто хорошо. Лечится «IPv6 TProxy» в «Дополнительных настройках» |
+| Подозрение на утечку по IPv6 | PassWall2 перехватывает только v4, но при включённом FakeDNS утечки нет: для проксируемых доменов AAAA не выдаётся, клиент идёт по v4. Проверить обе стороны: `nslookup -type=AAAA ipinfo.io 127.0.0.1` (проксируемый — должно быть пусто) и `nslookup -type=AAAA ya.ru 127.0.0.1` (прямой — AAAA должны быть, иначе v6 прибит целиком). Барьер не действует на устройства с зашитым DoH — они спрашивают DNS мимо роутера |
 | В браузере не работает то, что работает из консоли | включён DoH («Secure DNS» в Chrome) — браузер ходит мимо dnsmasq. Выключить |
 | Zapret обрабатывает не тот трафик | не стоит «Записывать результаты прямого DNS в IPSet». Без неё в xray заходит **весь** TCP, и наружу идёт поток xray, а не клиента |
 | `apk update` не видит штатный фид | лёг `downloads.openwrt.org`: `sed -i 's\|https://downloads.openwrt.org/\|https://mirror-03.infra.openwrt.org/\|' /etc/apk/repositories.d/distfeeds.list` |
@@ -162,15 +144,12 @@ DPI: https://hyperion-cs.github.io/dpi-checkers/ru/tcp-16-20/
 
 Логи: `/tmp/log/passwall2.log`, `logread | grep passwall2`, либо вкладка «Журналы выполнения».
 
-RAM: официальный минимум PassWall2 — **256 МБ**. На роутерах с 256 МБ и меньше работает,
-но запаса нет: не ставить geo-пакеты сверх нужного и не включать «анализ данных GeoIP».
+RAM: официальный минимум PassWall2 — **256 МБ**. На роутерах с 256 МБ и меньше работает, но запаса нет: не ставить geo-пакеты сверх нужного и не включать «анализ данных GeoIP».
 
 ---
 
 ## Ссылки
 
-- [PassWall2](https://github.com/Openwrt-Passwall/openwrt-passwall2) ·
-  [сборки под 25.12](https://sourceforge.net/projects/openwrt-passwall-build/files/releases/packages-25.12/)
-- [Zapret-Manager](https://github.com/StressOzz/Zapret-Manager) ·
-  [архивы Zapret](https://github.com/remittor/zapret-openwrt/releases)
+- [PassWall2](https://github.com/Openwrt-Passwall/openwrt-passwall2) · [сборки под 25.12](https://sourceforge.net/projects/openwrt-passwall-build/files/releases/packages-25.12/)
+- [Zapret-Manager](https://github.com/StressOzz/Zapret-Manager) · [архивы Zapret](https://github.com/remittor/zapret-openwrt/releases)
 - [Проверка DPI](https://hyperion-cs.github.io/dpi-checkers/ru/tcp-16-20/)
