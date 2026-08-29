@@ -1,7 +1,7 @@
 # PassWall2 + Zapret на OpenWrt 25.12
 
 Точечная маршрутизация через VPN (PassWall2) плюс обход DPI (Zapret) на чистом роутере
-с OpenWrt 25.12. Замена связки Zapret + Podkop.
+с OpenWrt 25.12
 
 Нужно: SSH на роутер, рабочий интернет, **≥25 МБ** в `/overlay`, vless ключ или ссылка на подписку.
 
