@@ -1,4 +1,4 @@
-Zapret + PassWall2 на OpenWrt 25.12
+# Zapret + PassWall2 на OpenWrt 25.12
 
 Настройка **Zapret** (обход DPI) и **PassWall2** (маршрутизация трафика через VPN)
 на чистом роутере с **OpenWrt 25.12**.
