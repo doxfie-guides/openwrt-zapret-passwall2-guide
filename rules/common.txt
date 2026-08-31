@@ -1,0 +1,43 @@
+# --- GitHub
+domain:github.com
+domain:githubusercontent.com
+domain:githubassets.com
+domain:openwrt.org
+domain:sourceforge.net
+
+# --- Telegram
+geosite:telegram
+
+# --- Rutor
+domain:rutor.info
+domain:rutracker.org
+
+# --- WhatsApp
+geosite:whatsapp
+# в категории нет, а это CDN для медиа
+domain:whatsapp.fbsbx.com
+
+# --- Grok
+domain:grok.com
+domain:x.ai
+
+# --- OpenAI
+geosite:openai
+# в категории нет, а это логин
+domain:cdn.auth0.com
+
+# --- Figma
+domain:figma.com
+
+# --- Spotify
+geosite:spotify
+
+# --- Others
+domain:auth.docker.io
+domain:onlinesim.io
+# ipinfo.io в туннеле: проверять «прямой» IP им нельзя, бери ifconfig.me
+domain:ipinfo.io
+domain:habr.com
+
+# --- Telegram
+geoip:telegram

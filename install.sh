@@ -11,7 +11,6 @@ DOH_SYS_ADDR="127.0.0.53"
 DNS_FALLBACK="94.140.14.14"
 FEED_BASE="https://master.dl.sourceforge.net/project/openwrt-passwall-build"
 SHUNT="rulenode"
-BAK="/root/backup-$(date +%Y%m%d-%H%M%S)"
 
 step() { echo; echo "[$1] $2"; }
 die()  { echo; echo "ОШИБКА: $*" >&2; exit 1; }
@@ -34,9 +33,6 @@ FREE=$(df -k /overlay 2>/dev/null | awk 'NR==2{print int($4/1024)}')
 [ "$FREE" -ge 25 ] || die "в /overlay свободно ${FREE} МБ, нужно не меньше 25"
 
 echo "OpenWrt $DISTRIB_RELEASE ($DISTRIB_ARCH), свободно ${FREE} МБ"
-mkdir -p "$BAK"
-cp /etc/config/network "$BAK/" 2>/dev/null || true
-cp /etc/config/dhcp    "$BAK/" 2>/dev/null || true
 
 # --- 1. Репозиторий ----------------------------------------------------------
 
@@ -58,9 +54,11 @@ apk add kmod-nft-socket kmod-nft-tproxy kmod-nft-nat >/dev/null
 
 if dnsmasq --version 2>/dev/null | grep -q no-nftset; then
   echo "  штатный dnsmasq собран без nftset — ставим dnsmasq-full"
+  # apk кладёт свой /etc/config/dhcp, поэтому текущий сохраняем и возвращаем
+  cp /etc/config/dhcp /tmp/dhcp.keep 2>/dev/null || true
   apk del dnsmasq >/dev/null 2>&1 || true
   apk add dnsmasq-full >/dev/null
-  [ -f "$BAK/dhcp" ] && cp "$BAK/dhcp" /etc/config/dhcp
+  [ -f /tmp/dhcp.keep ] && mv /tmp/dhcp.keep /etc/config/dhcp
   /etc/init.d/dnsmasq restart >/dev/null 2>&1 || true
 fi
 /etc/init.d/rpcd restart >/dev/null 2>&1 || true
@@ -171,7 +169,6 @@ echo
 if [ "$FAIL" = 0 ]; then
   echo "===================================================================="
   echo " Готово. PassWall2 установлен, весь трафик пока идёт напрямую."
-  echo " Бэкап конфигов: $BAK"
   echo
   echo " Дальше руками:"
   echo "  1. LuCI - Services - PassWall 2 - Подписки: добавить подписку,"
@@ -180,7 +177,8 @@ if [ "$FAIL" = 0 ]; then
   echo "     (имя правила только из букв, цифр и подчёркиваний)"
   echo "  3. Общие параметры - Правила разделения трафика:"
   echo "     напротив правил выбрать ноду, «По умолчанию» = Прямое соединение"
-  echo "  4. /etc/init.d/passwall2 restart"
+  echo "  4. Перезапустить PassWall2: System - Startup - passwall2 - Restart"
+  echo "     (или /etc/init.d/passwall2 restart)"
   echo "  5. Zapret:"
   echo "     sh <(wget -O - https://raw.githubusercontent.com/StressOzz/Zapret-Manager/main/Zapret-Manager.sh)"
   echo "===================================================================="
@@ -188,6 +186,5 @@ else
   echo "Что-то не поднялось. Логи:"
   echo "  logread -e https-dns-proxy"
   echo "  logread | grep passwall2"
-  echo "Откат: cp $BAK/* /etc/config/ && reboot"
   exit 1
 fi
