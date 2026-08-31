@@ -13,6 +13,9 @@
 > [!TIP]
 > После **любого** изменения настроек или правил: `/etc/init.d/passwall2 restart`. LuCI службу не перечитывает — `reload` в её init-скрипте заглушка, поэтому Save & Apply сохранит конфиг, но работать будет старый.
 
+> [!CAUTION]
+> Рестарт PassWall2 на несколько секунд роняет туннель и рвёт все активные соединения. Если настраиваете роутер удалённо через этот же туннель — вы отрежете себя. Планируйте рестарт последним шагом либо поднимите VPN-клиент прямо на компьютере.
+
 ---
 
 ## 1. Установка
@@ -116,7 +119,73 @@ domain:sourceforge.net
 
 ---
 
-## 6. Проверка
+## 6. Свой DNS
+
+Без этого шага часть сайтов не откроется даже с рабочим Zapret. Российские провайдеры подменяют DNS-ответы для заблокированных сайтов: `www.instagram.com` вместо реального адреса отдаётся как `127.0.0.1`. Соединение тогда не создаётся вовсе, и обходить DPI попросту нечего.
+
+PassWall2 резолвит **прямые** домены системным резолвером роутера, то есть DNS провайдера. Поля для прямого DNS в `luci-app-passwall2 26.8.27` нет — в UI только «Стратегия прямого запроса», адрес не настраивается. Поэтому чиним не в PassWall2.
+
+**Проверка, есть ли подмена:**
+
+```sh
+nslookup www.instagram.com $(sed -n 's/^nameserver //p' /tmp/resolv.conf.d/resolv.conf.auto | head -1)
+```
+
+`127.0.0.1`, `0.0.0.0` или `::1` в ответе — подмена. Реальный адрес выглядит как `57.144.222.34`.
+
+**Лечение — свой DoH-резолвер:**
+
+```sh
+apk add https-dns-proxy luci-app-https-dns-proxy
+uci set https-dns-proxy.config.dnsmasq_config_update='0'
+uci set https-dns-proxy.config.force_dns='0'
+uci set https-dns-proxy.@https-dns-proxy[1].resolver_url='https://1.1.1.1/dns-query'
+uci set https-dns-proxy.@https-dns-proxy[1].bootstrap_dns='1.1.1.1,1.0.0.1,2606:4700:4700::1111,2606:4700:4700::1001'
+uci commit https-dns-proxy
+/etc/init.d/https-dns-proxy enable
+/etc/init.d/https-dns-proxy restart
+```
+
+Пакет поднимает два инстанса на `127.0.0.1:5053` и `:5054`. Второй по умолчанию — Google, и он на российских линиях отдаёт заблокированный адрес Instagram, поэтому команда выше переводит его тоже на Cloudflare.
+
+> [!WARNING]
+> **Порты `5053`/`5054` менять нельзя.** PassWall2 при рестарте сам находит `https-dns-proxy` и прописывает его в свой прямой резолвер (`dns_default_direct.conf`) именно как `server=127.0.0.1#5053` и `#5054` — по дефолтным портам. Посадите прокси на свои — и PassWall2 после ближайшего рестарта будет спрашивать пустоту, а прямой резолв тихо сломается.
+
+Две галки в первых строках отключают вмешательство `https-dns-proxy` в dnsmasq и в правила перехвата DNS — этим уже управляет PassWall2, а два хозяина у одного dnsmasq конфликтуют.
+
+**Системный резолвер роутера** (обновления, ntp, сам Zapret-Manager) живёт отдельно и всё ещё смотрит на провайдера. Ему нужен третий инстанс на обычном порту:
+
+```sh
+uci add https-dns-proxy https-dns-proxy
+uci set https-dns-proxy.@https-dns-proxy[2].resolver_url='https://cloudflare-dns.com/dns-query'
+uci set https-dns-proxy.@https-dns-proxy[2].bootstrap_dns='1.1.1.1,1.0.0.1,2606:4700:4700::1111,2606:4700:4700::1001'
+uci set https-dns-proxy.@https-dns-proxy[2].listen_addr='127.0.0.53'
+uci set https-dns-proxy.@https-dns-proxy[2].listen_port='53'
+uci commit https-dns-proxy
+/etc/init.d/https-dns-proxy restart
+netstat -lnup | grep https-dns
+```
+
+Ждём три строки: `127.0.0.1:5053`, `127.0.0.1:5054`, `127.0.0.53:53`.
+
+Дальше **Network → Interfaces → WAN → Дополнительные настройки**: снять **«Use DNS servers advertised by peer»**, в **«Use custom DNS servers»** вписать `127.0.0.53`. Вторым адресом можно добавить `94.140.14.14` — аварийный фолбэк на случай, если DoH недоступен.
+
+Проверять резолв надо на трёх уровнях, они независимы:
+
+```sh
+nslookup -port=2003 www.instagram.com 127.0.0.1   # прямой резолвер PassWall2
+nslookup www.instagram.com 127.0.0.1              # то, что видят клиенты
+nslookup www.instagram.com 127.0.0.53             # системный резолвер роутера
+```
+
+Везде должен быть реальный адрес.
+
+> [!NOTE]
+> Публичные DNS по обычному UDP на многих российских линиях просто не отвечают — `8.8.8.8`, `9.9.9.9`, `77.88.8.8`, OpenDNS, NextDNS уходят в таймаут. Поэтому и нужен именно DoH: он идёт по 443/TCP и проходит там, где plain-DNS зарезан.
+
+---
+
+## 7. Проверка
 
 ```sh
 curl -s -m 10 https://ifconfig.me/ip; echo " <- прямой, ждём домашний"
@@ -141,6 +210,12 @@ DPI: https://hyperion-cs.github.io/dpi-checkers/ru/tcp-16-20/
 | Подозрение на утечку по IPv6 | PassWall2 перехватывает только v4, но при включённом FakeDNS утечки нет: для проксируемых доменов AAAA не выдаётся, клиент идёт по v4. Проверить обе стороны: `nslookup -type=AAAA ipinfo.io 127.0.0.1` (проксируемый — должно быть пусто) и `nslookup -type=AAAA ya.ru 127.0.0.1` (прямой — AAAA должны быть, иначе v6 прибит целиком). Барьер не действует на устройства с зашитым DoH — они спрашивают DNS мимо роутера |
 | В браузере не работает то, что работает из консоли | включён DoH («Secure DNS» в Chrome) — браузер ходит мимо dnsmasq. Выключить |
 | Zapret обрабатывает не тот трафик | не стоит «Записывать результаты прямого DNS в IPSet». Без неё в xray заходит **весь** TCP, и наружу идёт поток xray, а не клиента |
+| Сайт не открывается, хотя Zapret работает и другие сайты чинит | сначала DNS, а не стратегия. `nslookup <домен> 127.0.0.1` — если `127.0.0.1`/`0.0.0.0`, это подмена провайдером, см. [раздел 6](#6-свой-dns) |
+| DNS чинён, адрес реальный, но сайт всё равно молчит | блок по IP, а не по имени. Проверить: `curl -sS -o /dev/null -m 10 -w "%{http_code}
+" --resolve <домен>:443:<IP> https://<домен>/`. Если один адрес молчит, а другие того же сайта отвечают 200 — адрес забанен, **Zapret тут бессилен принципиально**: дурение DPI не оживляет дроп по адресу назначения. Лечится только другим адресом (другой резолвер) или заворотом домена в туннель |
+| После настройки DoH прямой резолв сломался | у `https-dns-proxy` сменили порты. PassWall2 ждёт его строго на `127.0.0.1:5053/5054` — вернуть дефолт |
+| Инстанс `https-dns-proxy` не поднимается | в журнале `c-ares needed more IO event handler, than the number of provided nameservers: 2` — в `bootstrap_dns` два адреса. Указать все четыре (2×IPv4 + 2×IPv6) |
+| Сайт работает на телефоне, но не на ПК (или наоборот) | часть блокировок только по IPv4. Проверить обе стороны: `curl -4` и `curl -6`. Если v6 отвечает, а v4 нет — устройства с рабочим IPv6 не заметят проблемы |
 | `apk update` не видит штатный фид | лёг `downloads.openwrt.org`: `sed -i 's\|https://downloads.openwrt.org/\|https://mirror-03.infra.openwrt.org/\|' /etc/apk/repositories.d/distfeeds.list` |
 | Не хватает места | снести старое решение вместе с sing-box (~42 МБ): `apk del luci-app-netshift netshift sing-box` |
 | Zapret не качается даже через туннель | скачать zip с [remittor/zapret-openwrt](https://github.com/remittor/zapret-openwrt/releases) на ПК, залить в `/tmp/zapret_temp`, распаковать и `apk add --allow-untrusted apk/*.apk` (сначала `zapret*`, потом `luci*`) |
@@ -155,4 +230,5 @@ RAM: официальный минимум PassWall2 — **256 МБ**. На ро
 
 - [PassWall2](https://github.com/Openwrt-Passwall/openwrt-passwall2) · [сборки под 25.12](https://sourceforge.net/projects/openwrt-passwall-build/files/releases/packages-25.12/)
 - [Zapret-Manager](https://github.com/StressOzz/Zapret-Manager) · [архивы Zapret](https://github.com/remittor/zapret-openwrt/releases)
+- [https-dns-proxy](https://github.com/aarond10/https_dns_proxy) · [список DoH-резолверов](https://github.com/curl/curl/wiki/DNS-over-HTTPS)
 - [Проверка DPI](https://hyperion-cs.github.io/dpi-checkers/ru/tcp-16-20/)
