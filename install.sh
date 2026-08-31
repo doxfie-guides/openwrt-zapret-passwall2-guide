@@ -148,6 +148,19 @@ uci set passwall2.@global[0].client_proxy='1'
 uci commit passwall2
 
 /etc/init.d/passwall2 enable >/dev/null 2>&1 || true
+
+# ucitrack регистрирует триггеры только при своём старте, а на момент загрузки
+# роутера passwall2 ещё не было. Без этого рестарта Save & Apply в LuCI сохранит
+# конфиг, но службу не перезапустит, и будет работать старая конфигурация.
+/etc/init.d/ucitrack restart >/dev/null 2>&1 || true
+sleep 2
+if ubus call service list '{"name":"ucitrack","verbose":true}' 2>/dev/null | grep -q passwall2; then
+  echo "  Save & Apply будет перезапускать PassWall2 сам"
+else
+  echo "  ВНИМАНИЕ: триггер ucitrack не зарегистрировался,"
+  echo "  перезапускать PassWall2 придётся вручную"
+fi
+
 /etc/init.d/passwall2 restart
 sleep 8
 
