@@ -112,7 +112,9 @@ WAN=$(uci show network 2>/dev/null | sed -n "s/^network\.\([a-z0-9_]*\)\.proto='
 [ -n "$WAN" ] || WAN=$(uci show network 2>/dev/null | sed -n "s/^network\.\([a-z0-9_]*\)\.proto='dhcp'/\1/p" | grep -v '^lan$' | head -1)
 [ -n "$WAN" ] || WAN=wan
 uci set network.$WAN.peerdns='0'
-uci -q delete network.$WAN.dns
+# "|| true" обязателен: uci delete на несуществующей опции возвращает 1,
+# а с set -e это молча обрывает скрипт (на WAN по DHCP опции dns обычно нет)
+uci -q delete network.$WAN.dns || true
 uci add_list network.$WAN.dns="$DOH_SYS_ADDR"
 uci add_list network.$WAN.dns="$DNS_FALLBACK"
 uci commit network
@@ -141,11 +143,17 @@ uci set passwall2.$SHUNT.fakedns='1'
 uci set passwall2.$SHUNT.enable_geoview_ip='0'
 uci set passwall2.$SHUNT.shunt_group='RU'
 
+uci -q get passwall2.@global[0] >/dev/null 2>&1 || uci add passwall2 global >/dev/null
 uci set passwall2.@global[0].enabled='1'
 uci set passwall2.@global[0].node="$SHUNT"
 uci set passwall2.@global[0].localhost_proxy='1'
 uci set passwall2.@global[0].client_proxy='1'
 uci commit passwall2
+
+# «Включить модуль» = enabled. Без него в LuCI висит «Core: Служба остановлена»
+[ "$(uci -q get passwall2.@global[0].enabled)" = 1 ] \
+  && echo "  узел $SHUNT создан, модуль включён" \
+  || die "не удалось включить модуль PassWall2"
 
 /etc/init.d/passwall2 enable >/dev/null 2>&1 || true
 
