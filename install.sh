@@ -30,9 +30,19 @@ esac
 
 FREE=$(df -k /overlay 2>/dev/null | awk 'NR==2{print int($4/1024)}')
 [ -n "$FREE" ] || FREE=0
-[ "$FREE" -ge 25 ] || die "в /overlay свободно ${FREE} МБ, нужно не меньше 25"
 
-echo "OpenWrt $DISTRIB_RELEASE ($DISTRIB_ARCH), свободно ${FREE} МБ"
+# при повторном запуске пакеты уже стоят, и 25 МБ свободных взяться неоткуда:
+# сам PassWall2 с geo-файлами занимает больше двадцати
+if apk info -e luci-app-passwall2 >/dev/null 2>&1; then
+  NEED=5
+  AGAIN=" — PassWall2 уже установлен, повторный запуск"
+else
+  NEED=25
+  AGAIN=""
+fi
+[ "$FREE" -ge "$NEED" ] || die "в /overlay свободно ${FREE} МБ, нужно не меньше ${NEED}"
+
+echo "OpenWrt $DISTRIB_RELEASE ($DISTRIB_ARCH), свободно ${FREE} МБ${AGAIN}"
 
 # --- 1. Репозиторий ----------------------------------------------------------
 
