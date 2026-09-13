@@ -182,6 +182,10 @@ uci set passwall2.$SHUNT.fakedns='1'
 uci set passwall2.$SHUNT.enable_geoview_ip='0'
 uci set passwall2.$SHUNT.shunt_group='RU'
 
+# демо-узел из стандартного конфига пакета: socks на passwall2.github, никуда не ведёт.
+# Ссылался на него только default_node у rulenode, а его мы выше перевели на _direct
+uci -q delete passwall2.examplenode || true
+
 uci -q get passwall2.@global[0] >/dev/null 2>&1 || uci add passwall2 global >/dev/null
 uci set passwall2.@global[0].enabled='1'
 uci set passwall2.@global[0].node="$SHUNT"
