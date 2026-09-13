@@ -179,7 +179,9 @@ uci set passwall2.$SHUNT.domainStrategy='AsIs'
 uci set passwall2.$SHUNT.domainMatcher='hybrid'
 uci set passwall2.$SHUNT.write_ipset_direct='1'
 uci set passwall2.$SHUNT.fakedns='1'
-uci set passwall2.$SHUNT.enable_geoview_ip='0'
+# «Анализ данных GeoIP»: грузит адреса из geoip:-правил в nft-наборы. В common
+# есть geoip:telegram, а проверенная связка у всех роутеров — с включённой галкой
+uci set passwall2.$SHUNT.enable_geoview_ip='1'
 uci set passwall2.$SHUNT.shunt_group='RU'
 
 # демо-узел из стандартного конфига пакета: socks на passwall2.github, никуда не ведёт.
