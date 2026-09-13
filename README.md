@@ -29,7 +29,8 @@ sh <(wget -O - https://raw.githubusercontent.com/doxfie-guides/openwrt-zapret-pa
 
 - подключает репозиторий PassWall2, ставит `luci-app-passwall2`, `xray-core` и нужные `kmod`-ы
 - при необходимости меняет `dnsmasq` на `dnsmasq-full` — штатный собран без `nftset`, а на нём держится связка с Zapret
-- ставит `https-dns-proxy` и поднимает три инстанса DoH. **Без своего DNS часть сайтов не откроется даже с рабочим Zapret**: провайдеры подменяют ответы, и соединение просто не создаётся
+- ставит `https-dns-proxy` и поднимает DoH-резолверы. **Без своего DNS часть сайтов не откроется даже с рабочим Zapret**: провайдеры подменяют ответы, и соединение просто не создаётся
+- отправляет `nalog.ru` на отдельный резолвер Google: Cloudflare зону «Моего налога» не резолвит
 - прописывает DoH в WAN, создаёт Shunt-узел с «По умолчанию → Прямое соединение» и включает модуль
 - выставляет то, что руками легко забыть: порядок разрешения имён **AsIs**, **FakeDNS**, **«Записывать результаты прямого DNS в IPSet»**
 - проверяет, что DNS и интернет живы
@@ -78,6 +79,17 @@ sh <(wget -O - https://raw.githubusercontent.com/StressOzz/Zapret-Manager/main/Z
 ```
 
 В меню: пункт **1** — установка, пункт **3** — стратегии.
+
+**Сразу после установки** исключите домены VPN из обработки Zapret:
+
+```sh
+printf 'doxfie.top
+doxfie.net
+' >> /opt/zapret/ipset/zapret-hosts-user-exclude.txt && /etc/init.d/zapret restart
+```
+
+> [!CAUTION]
+> Без этого часть стратегий ломает сам VPN. Стратегия `fake` на весь TCP/443 подсовывает фейковый ClientHello перед **каждым** соединением — в том числе перед хендшейком до VPN-сервера. Симптом: прямые сайты открываются, а всё, что идёт через туннель, висит; в клиенте на ПК живы только Hysteria и российские входы. После смены стратегии или обновления через Zapret-Manager проверьте, что строки на месте: `grep doxfie /opt/zapret/ipset/zapret-hosts-user-exclude.txt`
 
 Полное описание проекта: https://github.com/StressOzz/Zapret-Manager
 

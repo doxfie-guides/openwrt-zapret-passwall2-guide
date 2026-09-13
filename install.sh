@@ -105,15 +105,32 @@ uci set https-dns-proxy.@https-dns-proxy[$IDX].bootstrap_dns="$DOH_BOOTSTRAP"
 uci set https-dns-proxy.@https-dns-proxy[$IDX].listen_addr="$DOH_SYS_ADDR"
 uci set https-dns-proxy.@https-dns-proxy[$IDX].listen_port='53'
 
+# [gdns] — Google DoH под домены, которые Cloudflare не резолвит.
+# Зону gi.nalog.ru («Мой налог», lknpd/lkfl2) NS ФНС не отдают резолверам
+# Cloudflare: SERVFAIL. Google и AdGuard резолвят её нормально.
+uci set https-dns-proxy.gdns=https-dns-proxy
+uci set https-dns-proxy.gdns.resolver_url='https://dns.google/dns-query'
+uci set https-dns-proxy.gdns.bootstrap_dns="$DOH_BOOTSTRAP"
+uci set https-dns-proxy.gdns.listen_addr='127.0.0.1'
+uci set https-dns-proxy.gdns.listen_port='5055'
+
 uci commit https-dns-proxy
 /etc/init.d/https-dns-proxy enable >/dev/null 2>&1 || true
 /etc/init.d/https-dns-proxy restart
 sleep 4
 
-for a in "127.0.0.1:5053" "127.0.0.1:5054" "$DOH_SYS_ADDR:53"; do
+# split-DNS: эти зоны dnsmasq спрашивает у Google; PassWall2 переносит правила к себе
+for z in nalog.ru nalog.gov.ru; do
+  uci -q get dhcp.@dnsmasq[0].server 2>/dev/null | grep -qF "/$z/127.0.0.1#5055" \
+    || uci add_list dhcp.@dnsmasq[0].server="/$z/127.0.0.1#5055"
+done
+uci commit dhcp
+/etc/init.d/dnsmasq restart >/dev/null 2>&1 || true
+
+for a in "127.0.0.1:5053" "127.0.0.1:5054" "127.0.0.1:5055" "$DOH_SYS_ADDR:53"; do
   netstat -lnup 2>/dev/null | grep -q "$a" || die "https-dns-proxy не слушает $a (смотрите: logread -e https-dns-proxy)"
 done
-echo "  слушает 127.0.0.1:5053, 127.0.0.1:5054, $DOH_SYS_ADDR:53"
+echo "  слушает 127.0.0.1:5053, 127.0.0.1:5054, 127.0.0.1:5055, $DOH_SYS_ADDR:53"
 
 # --- 4. WAN DNS --------------------------------------------------------------
 
@@ -136,6 +153,18 @@ printf '# Interface %s\nnameserver %s\nnameserver %s\n' "$WAN" "$DOH_SYS_ADDR" "
 echo "  $WAN -> $DOH_SYS_ADDR, запасной $DNS_FALLBACK"
 
 # --- 5. Заготовка PassWall2 --------------------------------------------------
+
+# Zapret ставится после скрипта, но при повторном запуске он уже может стоять.
+# Стратегия fake на весь TCP/443 бьёт и по Reality-хендшейку до наших нод —
+# всё, что PassWall2 шлёт в прокси, висит. По SNI это лечится исключением.
+ZEX=/opt/zapret/ipset/zapret-hosts-user-exclude.txt
+if [ -f "$ZEX" ]; then
+  for d in doxfie.top doxfie.net; do
+    grep -qxF "$d" "$ZEX" || echo "$d" >> "$ZEX"
+  done
+  /etc/init.d/zapret restart >/dev/null 2>&1 || true
+  echo "  zapret найден: домены doxfie в исключениях"
+fi
 
 step 5/6 "Базовая настройка PassWall2"
 if [ "$(uci -q get passwall2.$SHUNT)" != "nodes" ]; then
@@ -192,6 +221,11 @@ check_dns() {
 }
 check_dns 127.0.0.1 "для клиентов"
 check_dns "$DOH_SYS_ADDR" "системный"
+if nslookup -port=5055 lknpd.nalog.ru 127.0.0.1 2>/dev/null | sed -n '/Name:/,$p' | grep -qE '[0-9]{1,3}(\.[0-9]{1,3}){3}'; then
+  echo "  DNS для nalog.ru: ok"
+else
+  echo "  DNS для nalog.ru: НЕ РАБОТАЕТ (Мой налог не откроется)"; FAIL=1
+fi
 
 CODE=$(curl -s -o /dev/null -m 15 -w '%{http_code}' https://www.google.com/generate_204 2>/dev/null || true)
 if [ "$CODE" = 204 ]; then echo "  интернет: ok"; else echo "  интернет: НЕ РАБОТАЕТ (код '$CODE')"; FAIL=1; fi
