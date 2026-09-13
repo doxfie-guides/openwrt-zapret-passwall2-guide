@@ -83,9 +83,7 @@ sh <(wget -O - https://raw.githubusercontent.com/StressOzz/Zapret-Manager/main/Z
 **Сразу после установки** исключите домены VPN из обработки Zapret:
 
 ```sh
-printf 'doxfie.top
-doxfie.net
-' >> /opt/zapret/ipset/zapret-hosts-user-exclude.txt && /etc/init.d/zapret restart
+printf 'doxfie.top\ndoxfie.net\n' >> /opt/zapret/ipset/zapret-hosts-user-exclude.txt && /etc/init.d/zapret restart
 ```
 
 > [!CAUTION]
