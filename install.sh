@@ -193,11 +193,18 @@ uci set passwall2.@global[0].enabled='1'
 uci set passwall2.@global[0].node="$SHUNT"
 uci set passwall2.@global[0].localhost_proxy='1'
 uci set passwall2.@global[0].client_proxy='1'
+
+# IPv6 в туннель. Без этого проксируемый сайт с AAAA уходит мимо VPN с домашнего
+# адреса: FakeDNS глушит AAAA не всегда (кэш dnsmasq после смены правил и рестартов),
+# а geoip:-правила по IPv6 не ловятся вовсе. IPv6 TProxy работает только с TPROXY
+uci -q get passwall2.@global_forwarding[0] >/dev/null 2>&1 || uci add passwall2 global_forwarding >/dev/null
+uci set passwall2.@global_forwarding[0].tcp_proxy_way='tproxy'
+uci set passwall2.@global_forwarding[0].ipv6_tproxy='1'
 uci commit passwall2
 
 # «Включить модуль» = enabled. Без него в LuCI висит «Core: Служба остановлена»
 [ "$(uci -q get passwall2.@global[0].enabled)" = 1 ] \
-  && echo "  узел $SHUNT создан, модуль включён" \
+  && echo "  узел $SHUNT создан, модуль включён, IPv6 идёт через PassWall2" \
   || die "не удалось включить модуль PassWall2"
 
 /etc/init.d/passwall2 enable >/dev/null 2>&1 || true
