@@ -116,13 +116,20 @@ DPI-блокировки: https://hyperion-cs.github.io/dpi-checkers/ru/tcp-16-2
 
 ## 🔄 Обновление
 
-**Ядро и списки Geo** — прямо в PassWall2, вкладка **«Обновление компонентов»**: там обновляются `xray-core`, `geoip` и `geosite`. После замены ядра PassWall2 перезапустится сам.
+> [!WARNING]
+> **Ядро xray не обновлять отдельно от PassWall2.** Новые версии xray время от времени удаляют старые опции, а PassWall2 перестаёт их писать только в своём следующем релизе. Так xray 26.9.9 перестал принимать `proxySettings`, который ещё писал PassWall2 26.8.27: ядро не запускалось, туннель лёг целиком, перезагрузка роутера ничего не меняла. Как выбраться, если уже случилось, — в [TROUBLESHOOTING.md](TROUBLESHOOTING.md#грабли).
+>
+> Кнопку «Обновить» у Xray на странице **«Обновление компонентов»** не нажимать: она ставит бинарник прямо с GitHub XTLS, **включая пре-релизы**, и тут же перезапускает PassWall2.
 
-**Сам PassWall2 и остальные пакеты** — через **System → Software**: сначала `Update lists`, затем обновить нужные. По SSH то же самое:
+**PassWall2 — вместе с ядром, одной командой.** В репозитории PassWall2 ядро и сам PassWall2 собраны друг под друга:
 
 ```sh
-apk update && apk upgrade
+apk update && apk add -u luci-app-passwall2 luci-i18n-passwall2-ru xray-core
 ```
+
+То же в веб-интерфейсе: **System → Software** → `Update lists`, затем обновить эти три пакета. Во время обновления PassWall2 может перезапуститься, и туннель на несколько секунд пропадёт. Если какой-то пакет из-за этого не скачался, повторите команду.
+
+**Списки Geo** (`geoip`, `geosite`) — на вкладке **«Управление правилами»**, там же включается их автообновление. Ядро они не трогают.
 
 **Zapret** — через меню Zapret-Manager, той же командой, что и установка.
 
@@ -139,6 +146,9 @@ sh <(wget -O - https://raw.githubusercontent.com/StressOzz/Zapret-Manager/main/Z
 
 # перечитать настройки PassWall2
 /etc/init.d/passwall2 restart
+
+# обновить PassWall2 вместе с ядром (ядро отдельно не обновлять)
+apk update && apk add -u luci-app-passwall2 luci-i18n-passwall2-ru xray-core
 ```
 
 ---
