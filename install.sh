@@ -11,6 +11,8 @@ DOH_SYS_ADDR="127.0.0.53"
 DNS_FALLBACK="94.140.14.14"
 FEED_BASE="https://master.dl.sourceforge.net/project/openwrt-passwall-build"
 SHUNT="rulenode"
+TZ_NAME="Asia/Omsk"
+TZ_POSIX="<+06>-6"
 
 step() { echo; echo "[$1] $2"; }
 die()  { echo; echo "ОШИБКА: $*" >&2; exit 1; }
@@ -227,6 +229,21 @@ uci set passwall2.@global_rules[0].update_week_mode='7'
 uci set passwall2.@global_rules[0].update_time_mode='5:00'
 uci set passwall2.@global_rules[0].geoip_update='1'
 uci set passwall2.@global_rules[0].geosite_update='1'
+
+# Часовой пояс. Из коробки OpenWrt живёт в UTC, и «5:00» у обновлений выше, как и
+# у автообновления подписки, — это 11:00 по Омску: PassWall2 после свежего geo
+# перезапускается и рвёт туннель посреди дня. Пояс, выставленный руками, не трогаем.
+# cron перечитает пояс сам: PassWall2 при рестарте ниже перезапускает его
+ZONE=$(uci -q get system.@system[0].zonename || true)
+if [ -z "$ZONE" ] || [ "$ZONE" = UTC ]; then
+  uci set system.@system[0].zonename="$TZ_NAME"
+  uci set system.@system[0].timezone="$TZ_POSIX"
+  uci commit system
+  /etc/init.d/system reload
+  echo "  часовой пояс: $TZ_NAME"
+else
+  echo "  часовой пояс: $ZONE (оставлен как есть)"
+fi
 
 # IPv6 в туннель. Без этого проксируемый сайт с AAAA уходит мимо VPN с домашнего
 # адреса: FakeDNS глушит AAAA не всегда (кэш dnsmasq после смены правил и рестартов),
