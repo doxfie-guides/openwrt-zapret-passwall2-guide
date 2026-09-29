@@ -219,6 +219,15 @@ uci set passwall2.@global[0].node="$SHUNT"
 uci set passwall2.@global[0].localhost_proxy='1'
 uci set passwall2.@global[0].client_proxy='1'
 
+# Автообновление geoip/geosite. По умолчанию выключено, а правила ссылаются на
+# geoip:telegram и geosite:*, так что без него списки навсегда остаются от пакета.
+# Качается с GitHub, то есть через туннель; одинаковый файл (sha256) не перезаписывается
+uci -q get passwall2.@global_rules[0] >/dev/null 2>&1 || uci add passwall2 global_rules >/dev/null
+uci set passwall2.@global_rules[0].update_week_mode='7'
+uci set passwall2.@global_rules[0].update_time_mode='5:00'
+uci set passwall2.@global_rules[0].geoip_update='1'
+uci set passwall2.@global_rules[0].geosite_update='1'
+
 # IPv6 в туннель. Без этого проксируемый сайт с AAAA уходит мимо VPN с домашнего
 # адреса: FakeDNS глушит AAAA не всегда (кэш dnsmasq после смены правил и рестартов),
 # а geoip:-правила по IPv6 не ловятся вовсе. IPv6 TProxy работает только с TPROXY
@@ -276,6 +285,7 @@ if [ "$FAIL" = 0 ]; then
   echo " Дальше руками:"
   echo "  1. LuCI - Services - PassWall 2 - Подписки: добавить подписку,"
   echo "     User-Agent оставить v2rayN, галка «Отправлять HWID»,"
+  echo "     «Режим автоматического обновления» = Ежедневно,"
   echo "     затем «Ручное обновление подписки»"
   echo "  2. Управление правилами: создать правила"
   echo "     (имя правила только из букв, цифр и подчёркиваний)"
