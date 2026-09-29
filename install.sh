@@ -182,7 +182,32 @@ uci set passwall2.$SHUNT.fakedns='1'
 # «Анализ данных GeoIP»: грузит адреса из geoip:-правил в nft-наборы. В common
 # есть geoip:telegram, а проверенная связка у всех роутеров — с включённой галкой
 uci set passwall2.$SHUNT.enable_geoview_ip='1'
-uci set passwall2.$SHUNT.shunt_group='RU'
+
+# Группы правил. Узел показывает и применяет только правила своей группы
+# (shunt_group), а новое правило в LuCI падает в открытую вкладку. Демо-правила
+# пакета лежат в CN/IR/RU: свои правила легко завести в одной группе, а узел
+# оставить в другой — тогда в таблице узла одна строка «По умолчанию», а
+# выпадашка группы врёт «default». Демо-правила, к которым узел не привязан,
+# убираем — остаётся одна группа «default», путаться не в чем
+for r in DirectFront ProxyFront DirectGame ProxyGame CN Iran Russia_Block Russia; do
+  [ "$(uci -q get passwall2.$r)" = shunt_rules ] || continue
+  [ -z "$(uci -q get passwall2.$SHUNT.$r)" ] || continue
+  uci delete passwall2.$r
+done
+
+# узел — в ту группу, где лежат оставшиеся правила (пустая группа = «default»)
+RULE_GROUPS=$(uci show passwall2 | sed -n 's/^passwall2\.\([^.=]*\)=shunt_rules$/\1/p' \
+  | while read -r r; do echo "g:$(uci -q get passwall2.$r.group)"; done | sort -u)
+N_GROUPS=0
+[ -n "$RULE_GROUPS" ] && N_GROUPS=$(echo "$RULE_GROUPS" | wc -l)
+if [ "$N_GROUPS" -le 1 ] && [ -n "${RULE_GROUPS#g:}" ]; then
+  uci set passwall2.$SHUNT.shunt_group="${RULE_GROUPS#g:}"
+elif [ "$N_GROUPS" -le 1 ]; then
+  uci -q delete passwall2.$SHUNT.shunt_group || true
+else
+  echo "  ВНИМАНИЕ: правила в разных группах: $(echo "$RULE_GROUPS" | sed 's/^g:$/default/; s/^g://' | tr '\n' ' ')"
+  echo "  узел $SHUNT видит только группу «$(uci -q get passwall2.$SHUNT.shunt_group || echo default)»"
+fi
 
 # демо-узел из стандартного конфига пакета: socks на passwall2.github, никуда не ведёт.
 # Ссылался на него только default_node у rulenode, а его мы выше перевели на _direct
